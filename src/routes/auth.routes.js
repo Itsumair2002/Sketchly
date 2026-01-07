@@ -1,29 +1,28 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const nodemailer = require('nodemailer');
+const sgMail = require('@sendgrid/mail');
 const User = require('../models/User');
 const Otp = require('../models/Otp');
 const authHttp = require('../middleware/authHttp');
 
 const router = express.Router();
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.MAIL_USER,
-    pass: process.env.MAIL_PASS
-  }
-});
-
 const sendOtpEmail = async (email, code) => {
-  const from = process.env.MAIL_FROM || process.env.MAIL_USER;
-  await transporter.sendMail({
-    from,
+  const apiKey = process.env.SENDGRID_API_KEY;
+  const from = process.env.SENDGRID_FROM;
+  if (!apiKey || !from) {
+    throw new Error('SendGrid not configured');
+  }
+  sgMail.setApiKey(apiKey);
+  const sendPromise = sgMail.send({
     to: email,
+    from,
     subject: 'Your Sketchly verification code',
     text: `Your verification code is ${code}. It expires in 10 minutes.`,
   });
+  const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Email timeout')), 10000));
+  await Promise.race([sendPromise, timeout]);
 };
 
 const createOtpForUser = async (user) => {
