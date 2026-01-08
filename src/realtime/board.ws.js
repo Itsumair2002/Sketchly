@@ -123,6 +123,56 @@ const BOARD_ELEMENT_UPDATE = async (ws, payload, ctx, requestId) => {
   ctx.broadcast(roomSet, 'BOARD_ELEMENT_UPDATED', { roomId, elementId, patch });
 };
 
+const BOARD_ELEMENT_RESTORE = async (ws, payload, ctx, requestId) => {
+  const { roomId, elementId, element } = payload || {};
+  if (!roomId || !validate.isValidObjectId(roomId) || !validate.isNonEmptyString(elementId)) {
+    ctx.send(ws, 'ERROR', { code: 'BAD_REQUEST', message: 'Invalid payload' }, requestId);
+    return;
+  }
+
+  const { role, error } = await ctx.ensureMember(roomId, ws.user.userId);
+  if (!role) {
+    ctx.send(ws, 'ERROR', { code: 'ACCESS_DENIED', message: error || 'Not a member' }, requestId);
+    return;
+  }
+  const joinedRooms = ctx.socketRooms.get(ws);
+  if (!joinedRooms || !joinedRooms.has(roomId)) {
+    ctx.send(ws, 'ERROR', { code: 'NOT_JOINED', message: 'Join room first' }, requestId);
+    return;
+  }
+
+  const doc = await ctx.models.BoardElement.findOne({ roomId, elementId });
+  if (!doc) {
+    ctx.send(ws, 'ERROR', { code: 'NOT_FOUND', message: 'Element not found' }, requestId);
+    return;
+  }
+  if (doc.userId.toString() !== ws.user.userId.toString()) {
+    ctx.send(ws, 'ERROR', { code: 'ACCESS_DENIED', message: 'Cannot restore this element' }, requestId);
+    return;
+  }
+
+  if (element && typeof element.data === 'object') {
+    doc.data = { ...doc.data, ...element.data };
+  }
+  doc.isDeleted = false;
+  doc.updatedAt = new Date();
+  await doc.save();
+
+  const roomSet = ctx.roomSockets.get(roomId) || new Set();
+  ctx.broadcast(roomSet, 'BOARD_ELEMENT_RESTORED', {
+    roomId,
+    element: {
+      elementId: doc.elementId,
+      type: doc.type,
+      data: doc.data,
+      userId: doc.userId.toString(),
+      isDeleted: doc.isDeleted,
+      createdAt: doc.createdAt,
+      updatedAt: doc.updatedAt
+    }
+  });
+};
+
 const BOARD_ELEMENT_LIVE = async (ws, payload, ctx, requestId) => {
   const { roomId, element } = payload || {};
   if (!roomId || !validate.isValidObjectId(roomId)) {
@@ -147,4 +197,4 @@ const BOARD_ELEMENT_LIVE = async (ws, payload, ctx, requestId) => {
   ctx.broadcast(roomSet, 'BOARD_ELEMENT_LIVE', { roomId, element: { ...element, userId: ws.user.userId } }, ws);
 };
 
-module.exports = { BOARD_ELEMENT_ADD, BOARD_ELEMENT_DELETE, BOARD_ELEMENT_UPDATE, BOARD_ELEMENT_LIVE };
+module.exports = { BOARD_ELEMENT_ADD, BOARD_ELEMENT_DELETE, BOARD_ELEMENT_UPDATE, BOARD_ELEMENT_RESTORE, BOARD_ELEMENT_LIVE };
